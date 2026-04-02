@@ -1,0 +1,6 @@
+# Recommendation Engine — Dependencies
+# ----------------------------------------
+# Core modules use only the Python standard library (math, unittest).
+# The following is only needed to run tests via pytest.
+
+pytest>=7.0
