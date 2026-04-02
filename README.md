@@ -8,16 +8,11 @@ A modular, well-documented recommendation engine built in pure Python (no ML lib
 
 ```
 recommendation_engine/
-├── modules/
-│   ├── similarity_calculator.py   # Module 1 — cosine & Jaccard similarity
-│   ├── candidate_generator.py     # Module 2 — collaborative, content & popular candidates
-│   ├── scorer.py                  # Module 3 — weighted composite scoring & ranking
-│   └── evaluator.py               # Module 4 — precision, recall, F1, hit-rate, coverage
-├── data/
-│   └── sample_data.py             # Sample user ratings, item metadata & ground truth
-├── tests/
-│   └── test_all_modules.py        # Full unit + integration test suite
-├── recommendation_engine.py       # Orchestrator — ties all modules together
+├── similarity.py        # Module 1 — cosine, Jaccard & Pearson similarity
+├── candidate_gen.py     # Module 2 — collaborative, content & popular candidates
+├── scorer.py            # Module 3 — weighted composite scoring & ranking
+├── evaluator.py         # Module 4 — precision, recall, NDCG, F1, hit-rate, coverage
+├── test.py              # Comprehensive test suite (20/20 passing)
 ├── requirements.txt
 └── README.md
 ```
@@ -32,52 +27,50 @@ pip install -r requirements.txt
 ```
 *(No external ML libraries needed — only the Python standard library.)*
 
-### 2. Run the full demo
+### 2. Run all tests
 ```bash
-python recommendation_engine.py
+python test.py
 ```
 
-### 3. Run all tests
-```bash
-python -m pytest tests/test_all_modules.py -v
-# or
-python tests/test_all_modules.py
+Expected output:
+```
+TOTAL: 20/20 TESTS PASSED ✅
 ```
 
 ---
 
 ## Module Descriptions
 
-### Module 1 — `SimilarityCalculator`
-
-**File:** `modules/similarity_calculator.py`
+### Module 1 — `SimilarityCalculator` (`similarity.py`)
 
 Measures how alike two users or items are.
 
-| Method | Description |
-|---|---|
-| `cosine_similarity(vec_a, vec_b)` | Cosine similarity between two rating vectors (dicts). Returns `[0, 1]`. |
-| `jaccard_similarity(set_a, set_b)` | Jaccard similarity between two item sets. Returns `[0, 1]`. |
-| `most_similar_users(user, ratings, method, top_n)` | Returns the top-N most similar users using either method. |
+| Method | Description | Returns |
+|---|---|---|
+| `cosine_similarity(vec_a, vec_b)` | Cosine similarity between two rating vectors (dicts) | `[0, 1]` |
+| `jaccard_similarity(set_a, set_b)` | Jaccard similarity between two item sets | `[0, 1]` |
+| `pearson_correlation(vec_a, vec_b)` | Pearson correlation for rating bias correction | `[-1, 1]` |
+| `most_similar_users(user, ratings, method, top_n)` | Returns the top-N most similar users | List of `(user, score)` |
 
 **When to use each:**
 - **Cosine** — best when ratings vary in magnitude (e.g., user A rates 1–3, user B rates 3–5).
 - **Jaccard** — best for binary data (bought / not bought, liked / not liked).
+- **Pearson** — best when you want to correct for rating bias between users.
 
 ---
 
-### Module 2 — `CandidateGenerator`
-
-**File:** `modules/candidate_generator.py`
+### Module 2 — `CandidateGenerator` (`candidate_gen.py`)
 
 Finds items worth considering for a user, using three strategies:
 
 | Strategy | How it works |
 |---|---|
-| `collaborative` | Items rated highly (≥ 3.5) by similar users that the target hasn't seen. |
-| `content` | Items whose metadata (attributes) are similar to the user's top-rated items. |
-| `popular` | Globally popular items (by number of ratings) the user hasn't rated yet. |
-| `all` | Union of all three strategies (default). |
+| `collaborative` | Items rated highly (≥ 3.5) by similar users that the target hasn't seen |
+| `content` | Items whose metadata (attributes) are similar to the user's top-rated items |
+| `popular` | Globally popular items (by number of ratings) the user hasn't rated yet |
+| `all` (default) | Union of all three strategies above |
+
+**Cold-start handling:** If a user is unknown, the generator logs a warning and automatically falls back to popularity-based candidates — no crash, graceful degradation.
 
 ```python
 gen = CandidateGenerator(user_ratings, item_metadata)
@@ -86,9 +79,7 @@ candidates = gen.generate("alice", strategy="all")
 
 ---
 
-### Module 3 — `Scorer`
-
-**File:** `modules/scorer.py`
+### Module 3 — `RecommendationScorer` (`scorer.py`)
 
 Ranks candidates using a weighted composite score:
 
@@ -102,26 +93,25 @@ All sub-scores are normalised to `[0, 1]`.
 
 | Method | Description |
 |---|---|
-| `score_item(user, item)` | Composite score for a single item. |
-| `rank_candidates(user, candidates, top_n)` | Rank all candidates, return top-N. |
-| `explain_score(user, item)` | Breakdown of each score component. |
+| `calculate_score(user, item)` | Composite score for a single item — returns float in `[0, 1]` |
+| `rank_candidates(user, candidates, limit)` | Score all candidates, return top-N sorted descending |
+| `explain_score(user, item)` | Breakdown of each score component for transparency |
+| `add_scorer(name, function, weight)` | Register a custom scoring function at runtime |
 
 ```python
-scorer = Scorer(user_ratings, item_metadata)
-ranked = scorer.rank_candidates("alice", candidates, top_n=5)
+scorer = RecommendationScorer(user_ratings, item_metadata)
+ranked = scorer.rank_candidates("alice", candidates, limit=5)
 ```
 
 Custom weights:
 ```python
-scorer = Scorer(user_ratings, item_metadata,
+scorer = RecommendationScorer(user_ratings, item_metadata,
                 weights={"collaborative": 0.7, "content": 0.2, "popularity": 0.1})
 ```
 
 ---
 
-### Module 4 — `Evaluator`
-
-**File:** `modules/evaluator.py`
+### Module 4 — `Evaluator` (`evaluator.py`)
 
 Checks recommendation quality against held-out ground-truth data.
 
@@ -129,9 +119,10 @@ Checks recommendation quality against held-out ground-truth data.
 |---|---|
 | **Precision@K** | Of the top-K items recommended, what fraction is relevant? |
 | **Recall@K** | Of all relevant items, what fraction appears in the top-K? |
-| **F1@K** | Harmonic mean of precision and recall. |
-| **Hit Rate@K** | 1 if at least one relevant item is in the top-K. |
-| **Coverage** | Fraction of the full catalogue ever recommended. |
+| **F1@K** | Harmonic mean of precision and recall |
+| **NDCG@K** | Ranking quality — rewards relevant items appearing earlier |
+| **Hit Rate@K** | 1 if at least one relevant item is in the top-K |
+| **Coverage** | Fraction of the full catalogue ever recommended |
 
 ```python
 evaluator = Evaluator()
@@ -140,50 +131,37 @@ results = evaluator.evaluate_all(user_results, all_items, k=5)
 
 ---
 
-## Using the Orchestrator
+## Test Results
 
-```python
-from recommendation_engine import RecommendationEngine
-from data.sample_data import USER_RATINGS, ITEM_METADATA, GROUND_TRUTH
-
-engine = RecommendationEngine(USER_RATINGS, ITEM_METADATA)
-
-# Get recommendations
-recs = engine.recommend("alice", top_n=5, verbose=True)
-
-# Find similar users
-similar = engine.find_similar_users("alice", top_n=3)
-
-# Add a new user at runtime (dynamic update)
-engine.add_user("zara", {"laptop": 5, "headphones": 4})
-recs = engine.recommend("zara", top_n=5)
-
-# Evaluate the system
-metrics = engine.evaluate(GROUND_TRUTH, top_n=5, k=5)
-```
+| Test Group | Tests Covered | Result |
+|---|---|---|
+| Similarity Calculator | Cosine, orthogonal, Jaccard, Pearson, most_similar_users | ✅ 5/5 |
+| Candidate Generator | Collaborative, content, popularity, hybrid, excludes already-rated | ✅ 5/5 |
+| Scorer & Ranker | Score range, rank order, descending sort, explain, add_scorer | ✅ 5/5 |
+| Evaluator | Precision, recall, NDCG, evaluate_all, empty edge cases | ✅ 5/5 |
+| **Total** | | **✅ 20/20** |
 
 ---
 
 ## Sample Output
 
 ```
-=====================================================
+=======================================================
   Recommendations for 'alice'  (strategy=all)
-=====================================================
+=======================================================
   Candidates generated : 6
-  Rank  Item            Score  Breakdown
+  Rank  Item       Score   Breakdown
   --------------------------------------------------
-  1     monitor         0.4821  collab=0.72  content=0.35  pop=0.83
-  2     speaker         0.3614  collab=0.45  content=0.52  pop=0.67
-  3     webcam          0.3102  collab=0.41  content=0.28  pop=0.67
-  ...
+  1     speaker    0.7900  collab=1.0  content=0.8554  pop=0.1667
+  2     monitor    0.7105  collab=0.7529  content=0.7801  pop=0.5
+  3     usb_hub    0.6465  collab=0.6655  content=0.8237  pop=0.3333
 
-=== Evaluation Results (K=5) ===
-  precision@k    : 0.3667
-  recall@k       : 0.4444
-  f1@k           : 0.3966
-  hit_rate@k     : 0.8333
-  coverage       : 0.7
+=== Evaluation Against Ground Truth (K=5) ===
+  precision@k  : 0.4667
+  recall@k     : 0.7778
+  f1@k         : 0.5833
+  hit_rate@k   : 1.0
+  coverage     : 1.0
 ```
 
 ---
@@ -203,8 +181,8 @@ metrics = engine.evaluate(GROUND_TRUTH, top_n=5, k=5)
 
 - **Add a new similarity metric:** Extend `SimilarityCalculator` with a new method and pass `method=` to `most_similar_users`.
 - **Add a new candidate strategy:** Add a method to `CandidateGenerator` and register it in the `strategies` dict inside `generate()`.
-- **Change scoring weights:** Pass a custom `weights` dict to `Scorer` or `RecommendationEngine`.
-- **Add new metrics:** Extend `Evaluator` with methods like `ndcg_at_k` or `mrr`.
+- **Change scoring weights:** Pass a custom `weights` dict to `RecommendationScorer`.
+- **Add new metrics:** Extend `Evaluator` with methods like `mrr` or `map`.
 
 ---
 
