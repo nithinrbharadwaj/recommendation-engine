@@ -57,6 +57,39 @@ class SimilarityCalculator:
         union = len(set_a | set_b)
         return intersection / union
 
+    def pearson_correlation(self, ratings1: list, ratings2: list) -> float:
+        """
+        Compute Pearson correlation between two rating sequences.
+
+        Args:
+            ratings1: List of ratings for entity A
+            ratings2: List of ratings for entity B
+
+        Returns:
+            Float in [-1.0, 1.0]; 1.0 = perfect positive correlation, -1.0 = perfect negative
+        """
+        if len(ratings1) != len(ratings2) or len(ratings1) == 0:
+            return 0.0
+
+        # Calculate means
+        mean1 = sum(ratings1) / len(ratings1)
+        mean2 = sum(ratings2) / len(ratings2)
+
+        # Calculate standard deviations
+        var1 = sum((x - mean1) ** 2 for x in ratings1)
+        var2 = sum((x - mean2) ** 2 for x in ratings2)
+
+        if var1 == 0 or var2 == 0:
+            return 0.0
+
+        std1 = math.sqrt(var1)
+        std2 = math.sqrt(var2)
+
+        # Calculate covariance
+        covariance = sum((ratings1[i] - mean1) * (ratings2[i] - mean2) for i in range(len(ratings1)))
+
+        return covariance / (std1 * std2)
+
     def most_similar_users(
         self,
         target_user: str,

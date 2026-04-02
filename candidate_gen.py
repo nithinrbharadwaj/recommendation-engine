@@ -7,7 +7,7 @@ Generates candidate items for a user to consider, based on:
   - Popular items the user hasn't seen yet (popularity-based fallback)
 """
 
-from modules.similarity_calculator import SimilarityCalculator
+from similarity import SimilarityCalculator
 
 
 class CandidateGenerator:
@@ -107,7 +107,7 @@ class CandidateGenerator:
 
     # ── Popularity-Based Fallback ────────────────────────────────────────────
 
-    def popular_candidates(
+    def popularity_candidates(
         self,
         target_user: str,
         top_n: int = 10,
@@ -138,41 +138,36 @@ class CandidateGenerator:
 
     # ── Combined ─────────────────────────────────────────────────────────────
 
-    def generate(self, target_user: str, strategy: str = "all") -> set:
+    def hybrid_candidates(self, target_user: str) -> set:
         """
-        Generate candidates using one or all strategies.
+        Generate candidates using all strategies combined (hybrid approach).
 
         Args:
             target_user: Target user ID
-            strategy:    'collaborative' | 'content' | 'popular' | 'all'
 
         Returns:
             Combined set of candidate item IDs
         """
-        strategies = {
-            "collaborative": self.collaborative_candidates,
-            "content":       self.content_based_candidates,
-            "popular":       self.popular_candidates,
-        }
-
-        if strategy == "all":
-            candidates = set()
-            for fn in strategies.values():
-                candidates |= fn(target_user)
-            return candidates
-
-        if strategy not in strategies:
-            raise ValueError(
-                f"Unknown strategy '{strategy}'. "
-                f"Choose from: {list(strategies.keys())} or 'all'."
-            )
-
-        return strategies[strategy](target_user)
+        collab = self.collaborative_candidates(target_user)
+        content = self.content_based_candidates(target_user)
+        popular = self.popularity_candidates(target_user)
+        return collab | content | popular
 
 
 # ── Quick self-test ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    from data.sample_data import USER_RATINGS, ITEM_METADATA
+    # Sample data for testing
+    USER_RATINGS = {
+        "alice": {"item1": 5, "item2": 3, "item3": 4},
+        "bob":   {"item1": 4, "item2": 3, "item3": 5},
+        "carol": {"item1": 1, "item2": 5, "item3": 2},
+    }
+    
+    ITEM_METADATA = {
+        "item1": {"genre": 0.8, "action": 0.9},
+        "item2": {"genre": 0.5, "action": 0.3},
+        "item3": {"genre": 0.7, "action": 0.8},
+    }
 
     gen = CandidateGenerator(USER_RATINGS, ITEM_METADATA)
 
@@ -180,5 +175,5 @@ if __name__ == "__main__":
     print(f"=== Candidates for '{target}' ===")
     print(f"Collaborative : {gen.collaborative_candidates(target)}")
     print(f"Content-Based : {gen.content_based_candidates(target)}")
-    print(f"Popular       : {gen.popular_candidates(target)}")
-    print(f"All combined  : {gen.generate(target)}")
+    print(f"Popular       : {gen.popularity_candidates(target)}")
+    print(f"Hybrid        : {gen.hybrid_candidates(target)}")
